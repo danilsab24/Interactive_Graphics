@@ -3,7 +3,7 @@
 // It returns the combined 4x4 transformation matrix as an array in column-major order.
 // The given projection matrix is also a 4x4 matrix stored as an array in column-major order.
 // You can use the MatrixMult function defined in project4.html to multiply two 4x4 matrices in the same format.
-function GetModelViewProjection( projectionMatrix, translationX, translationY, translationZ, rotationX, rotationY )
+function GetModelViewProjection(projectionMatrix, translationX, translationY, translationZ, rotationX, rotationY)
 {
     // Compute cosines and sines for the two rotation angles
     var cosX = Math.cos(rotationX);
@@ -12,7 +12,6 @@ function GetModelViewProjection( projectionMatrix, translationX, translationY, t
     var sinY = Math.sin(rotationY);
 
     // Rotation around the X-axis in column-major order
-    // First column, second column, etc. (remember that the array is in column-major format)
     var rotX = [
         1,    0,     0,     0,
         0,  cosX,  sinX,    0,
@@ -36,14 +35,6 @@ function GetModelViewProjection( projectionMatrix, translationX, translationY, t
         translationX, translationY, translationZ, 1
     ];
 
-    // The final transformation is P * T * R_y * R_x
-    //   1) Multiply rotationX and rotationY (order depends on desired effect).
-    //   2) Multiply the result with translation.
-    //   3) Multiply the result with the projection matrix.
-    //
-    // If you find the rotations happen in the "reverse" order from what you expect,
-    // you can switch the order of MatrixMult(rotY, rotX) or do T * (R_y * R_x)
-    // depending on the assignment’s reference video.
     var rotXY   = MatrixMult(rotY, rotX);       // Combine the two rotations
     var transR  = MatrixMult(trans, rotXY);     // Apply translation
     var mvp     = MatrixMult(projectionMatrix, transR);
@@ -60,6 +51,18 @@ class MeshDrawer
 	constructor()
 	{
 		// [TO-DO] initializations
+		// From Project4.js -> gl = canvas.getContext("webgl", {antialias: false, depth: true});	// Initialize the GL context
+
+		this.prog = InitShaderProgram( meshVS, meshFS );
+		this.mvp = gl.getUniformLocation(this.prog, 'mvp' );
+		this.vertex=gl.getAttribLocation( this.prog, 'vertex');
+		this.text_coord=gl.getAttribLocation(this.prog,'text_coord');
+		this.Axis_Swap = gl.getUniformLocation(this.prog, 'Axis_Swap');
+		this.vertex_buffer = gl.createBuffer();
+		this.text_coord_buffer=gl.createBuffer();
+		this.sampler=gl.getUniformLocation(this.prog,'tex');
+		this.show_tex=gl.getUniformLocation(this.prog,'show_tex');
+
 	}
 	
 	// This method is called every time the user opens an OBJ file.
@@ -75,7 +78,15 @@ class MeshDrawer
 	setMesh( vertPos, texCoords )
 	{
 		// [TO-DO] Update the contents of the vertex buffer objects.
-		this.numTriangles = vertPos.length / 3;
+		this.numVertices = vertPos.length / 3;
+		// Bind of Buffer Object
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.vertex_buffer);
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertPos), gl.STATIC_DRAW);
+
+		// Bind of Texture Coordinate Buffer Object
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.text_coord_buffer);
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texCoords), gl.STATIC_DRAW);
+
 	}
 	
 	// This method is called when the user changes the state of the
@@ -84,6 +95,8 @@ class MeshDrawer
 	swapYZ( swap )
 	{
 		// [TO-DO] Set the uniform parameter(s) of the vertex shader
+		gl.useProgram(this.prog);
+		gl.uniform1i(this.Axis_Swap, swap);
 	}
 	
 	// This method is called to draw the triangular mesh.
@@ -92,8 +105,17 @@ class MeshDrawer
 	draw( trans )
 	{
 		// [TO-DO] Complete the WebGL initializations before drawing
+		gl.useProgram( this.prog);
+		gl.uniformMatrix4fv( this.mvp, false, trans );
 
-		gl.drawArrays( gl.TRIANGLES, 0, this.numTriangles );
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.vertex_buffer );
+		gl.vertexAttribPointer(this.vertex, 3, gl.FLOAT, false, 0, 0 );
+		gl.enableVertexAttribArray(this.vertex);
+        
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.text_coord_buffer );
+		gl.vertexAttribPointer( this.text_coord, 2, gl.FLOAT, false, 0, 0 );
+		gl.enableVertexAttribArray(this.text_coord);
+		gl.drawArrays( gl.TRIANGLES, 0, this.numVertices );
 	}
 	
 	// This method is called to set the texture of the mesh.
@@ -101,12 +123,24 @@ class MeshDrawer
 	setTexture( img )
 	{
 		// [TO-DO] Bind the texture
-
+		gl.useProgram(this.prog);
+		const mytex= gl.createTexture();
+		gl.bindTexture(gl.TEXTURE_2D,mytex);
 		// You can set the texture image data using the following command.
 		gl.texImage2D( gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img );
 
 		// [TO-DO] Now that we have a texture, it might be a good idea to set
 		// some uniform parameter(s) of the fragment shader, so that it uses the texture.
+		gl.generateMipmap(gl.TEXTURE_2D);
+		gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);		
+		gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, mytex);
+		gl.uniform1i(this.sampler,0);
+		// For fix the problem with checkbox
+		gl.uniform1i(this.show_tex, 1);
 	}
 	
 	// This method is called when the user changes the state of the
@@ -115,6 +149,53 @@ class MeshDrawer
 	showTexture( show )
 	{
 		// [TO-DO] set the uniform parameter(s) of the fragment shader to specify if it should use the texture.
+		gl.useProgram(this.prog);
+        gl.uniform1i(this.show_tex, show);
 	}
 	
 }
+
+
+
+var meshVS = `
+	
+	uniform mat4 mvp;
+	uniform int Axis_Swap;
+
+	attribute vec2 text_coord;
+	attribute vec3 vertex;
+	
+	varying vec2 texCoord;
+    
+	void main()
+	{
+		vec4 new_vert =vec4(vertex,1.0);
+		if (Axis_Swap == 1) {
+			float temp=new_vert.y;
+			new_vert.y=new_vert.z;
+			new_vert.z=temp;
+		}
+		gl_Position = mvp * new_vert;
+		texCoord=text_coord;
+	}
+`;
+
+// Fragment shader source code
+var meshFS = `
+	precision mediump float;
+
+	uniform sampler2D tex;
+	uniform int show_tex;
+
+	varying vec2 texCoord;
+	
+	void main()
+	{
+		if (show_tex == 1){
+			gl_FragColor=texture2D(tex,texCoord);
+		}
+		else{
+			gl_FragColor = vec4(1,gl_FragCoord.z*gl_FragCoord.z,0,1);
+		}
+	}
+`;
