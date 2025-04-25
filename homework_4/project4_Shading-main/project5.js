@@ -52,20 +52,26 @@ class MeshDrawer
 	constructor()
 	{
 		// [TO-DO] initializations
-
+		//inizitialize the shader program
 		this.prog = InitShaderProgram(meshVS, meshFS);
+		gl.useProgram(this.prog)
+
 		this.mvpLoc = gl.getUniformLocation( this.prog, "mvp" );
 		this.mvLoc = gl.getUniformLocation( this.prog, "mv" );
 		this.texLoc = gl.getUniformLocation( this.prog, "sampler" );
 		this.normLoc = gl.getUniformLocation( this.prog, "normalMatrix" );
+
+		// light part
 		this.lightDir = gl.getUniformLocation( this.prog, "lightDir" );
 		this.shin = gl.getUniformLocation( this.prog, "shininess" );
 
 		this.vertexPos = gl.getAttribLocation( this.prog, "vertPos" );
 		this.texCoord = gl.getAttribLocation( this.prog, "vertTexCoord" );
 		this.norm = gl.getAttribLocation( this.prog, "vertNormal" );
-
+		
+		// redering part
 		this.vertexBuffer = gl.createBuffer();
+
 		this.texBuffer = gl.createBuffer();
 		this.normBuffer = gl.createBuffer();
 		this.swapLoc = gl.getUniformLocation( this.prog, "useSwap" );
@@ -104,9 +110,8 @@ class MeshDrawer
 	swapYZ( swap )
 	{
 		// [TO-DO] Set the uniform parameter(s) of the vertex shader
-		const swapValue = swap ? 1 : 0;
-		console.log("Setting swap uniform to:", swapValue);
-		gl.uniform1i(this.swapLoc, swapValue);
+		gl.useProgram(this.prog);
+		gl.uniform1i(this.swapLoc, swap ? 1 : 0);
 	}
 	
 	// This method is called to draw the triangular mesh.
@@ -156,6 +161,7 @@ class MeshDrawer
 		gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, mytex);
 		gl.uniform1i(this.texLoc,0);
+		gl.uniform1i(this.showText, 1);
 	}
 	
 	// This method is called when the user changes the state of the
@@ -165,7 +171,7 @@ class MeshDrawer
 	{
 		// [TO-DO] set the uniform parameter(s) of the fragment shader to specify if it should use the texture.
 		gl.useProgram(this.prog);
-        gl.uniform1i(this.show_tex, show);
+        gl.uniform1i(this.showText, show ? 1 : 0);
 	}
 	
 	// This method is called to set the incoming light direction
@@ -195,73 +201,57 @@ uniform mat4 mv;
 uniform mat3 normalMatrix;
 varying vec2 fragTexCoord;
 varying vec3 viewNormal;
-varying vec4 fragPos;
+varying vec3 fragPos;
 uniform bool useSwap;
+const mat4 SWAP = mat4(
+    1, 0,  0, 0,
+    0, 0, 1, 0,
+    0, 1,  0, 0,
+    0, 0,  0, 1 );
 void main()
 {
-	mat4 swap_matrix =mat4 ( 1, 0, 0, 0,
-		0, 0, -1, 0,
-		0, 1, 0, 0,
-		0, 0, 0, 1);
+    vec4 pos = vec4(vertPos, 1.0);
 
-	if(useSwap){
-		viewNormal = normalMatrix * vertNormal;
-		fragPos = mv * vec4(vertPos, 0.0);
-		gl_Position = mvp * swap_matrix * vec4(vertPos,1);
-	}
-	else {
-		viewNormal = normalMatrix * vertNormal;
-		fragPos = mv * vec4(vertPos, 0.0);
-		gl_Position = mvp * vec4(vertPos,1);
-	}
-	fragTexCoord = vertTexCoord;
+    mat4 M  = useSwap ? mv  * SWAP : mv;   
+    mat4 MVP= useSwap ? mvp * SWAP : mvp;  
+
+    fragPos    = vec3(M * pos);
+    viewNormal = normalize(normalMatrix * (useSwap ? mat3(SWAP) * vertNormal
+                                                   : vertNormal));
+
+    gl_Position = MVP * pos;
+    fragTexCoord = vertTexCoord;
 }
 `;
 
 
 var meshFS =  `
 precision mediump float;
+
 varying vec2 fragTexCoord;
 varying vec3 viewNormal;
-varying vec4 fragPos;
+varying vec3 fragPos;
 
 uniform sampler2D sampler;
-uniform vec3 lightDir;
+uniform vec3  lightDir;
 uniform float shininess;
-uniform bool showText;
+uniform bool  showText;
 
-void main() {
-    // Calculate light direction
-    vec3 lightDirection = normalize(-lightDir);
+void main()
+{
+    vec3 N = normalize(viewNormal);
+    vec3 L = normalize(lightDir);
+    vec3 V = normalize(-fragPos);
+    vec3 H = normalize(L + V);
 
-    // Calculate view direction
-    vec3 viewDirection = normalize(-fragPos.xyz);
+    float diff = max(dot(N, L), 0.0);
+    float spec = pow(max(dot(N, H), 0.0), shininess);
 
-    // Calculate halfway vector
-    vec3 halfwayDir = normalize(lightDirection + viewDirection);
+    vec3 Kd = showText ? texture2D(sampler, fragTexCoord).rgb : vec3(1.0);
+    vec3 Ks = vec3(1.0);
+    vec3 ambient = 0.1 * Kd;
 
-    // Calculate diffuse term
-    float diffuse = max(dot(viewNormal, lightDirection), 0.0);
-
-    // Calculate specular term
-    float specular = pow(max(dot(viewNormal, halfwayDir), 0.0), shininess);
-
-    // Apply texture if needed
-    vec3 textureColor = vec3(1.0);
-    if (showText) {
-        textureColor = texture2D(sampler, fragTexCoord).rgb;
-    }
-
-    // Define material properties
-    vec3 diffuseColor = vec3(1.0); // Diffuse color
-    vec3 specularColor = vec3(1.0); // Specular color
-
-    // Calculate final color
-    vec3 finalColor = diffuseColor * diffuse + specularColor * specular;
-    finalColor *= textureColor; // Multiply with texture color
-
-    gl_FragColor = vec4(finalColor, 1.0);
+    gl_FragColor = vec4(ambient + diff * Kd + spec * Ks, 1.0);
 }
-
 `;
 
